@@ -246,12 +246,12 @@ class SSS: public BaseSSS<a, b> {};
 template<size_t a>
 class BaseColoringSSS: public BaseSSS<a, 2> {
  public:
-  void drop_2_colors_vertexes(Vertex vertex) {
+  bool drop_2_colors_vertexes(Vertex vertex) {
     auto set_colors = this->allowed_colors_[vertex];
     auto colors = std::vector(set_colors.begin(), set_colors.end());
 
     if (colors.size() != 2) {
-      return;
+      return false;
     }
 
     Pair pair_R = Pair{vertex, colors[0]};
@@ -279,13 +279,70 @@ class BaseColoringSSS: public BaseSSS<a, 2> {
     }
 
     this->drop_vertex(vertex);
+
+    return true;
   }
 
-  void drop_2_colors_vertexes() {
+  bool drop_2_colors_vertexes() {
     auto copy_vertexes = this->vertexes_;
+    bool was_del = false;
+
     for (auto vertex: copy_vertexes) {
-      drop_2_colors_vertexes(vertex);
+      was_del |= drop_2_colors_vertexes(vertex);
     }
+
+    return was_del;
+  }
+
+  bool drop_1_colors_vertexes(Vertex vertex) {
+    auto set_colors = this->allowed_colors_[vertex];
+
+    if (set_colors.size() != 1) {
+      return false;
+    }
+
+    Color color = *set_colors.begin();
+    Pair pair = {vertex, color};
+    auto constraints = this->get_constraints(pair);
+
+    for (auto constraint: constraints) {
+      auto pair2 = get_other_pair(*constraint, pair);
+      this->drop_allow_color(pair2);
+    }
+
+    this->drop_vertex(vertex);
+
+    return true;
+  }
+
+  bool drop_1_colors_vertexes() {
+    auto copy_vertexes = this->vertexes_;
+    bool was_del = false;
+
+    for (auto vertex: copy_vertexes) {
+      was_del |= drop_1_colors_vertexes(vertex);
+    }
+
+    return was_del;
+  }
+
+  void drop_small_color_vertexes() {
+    bool was_del = true;
+
+    while (was_del) {
+      was_del = drop_2_colors_vertexes();
+      was_del |= drop_1_colors_vertexes();
+    }
+  }
+
+  bool has_uncolored_vertex() {
+    for (auto vertex: this->vertexes_) {
+      if (this->allowed_colors_[vertex].empty()) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
  protected:
@@ -303,13 +360,19 @@ template<>
 class SSS<3, 2>: public BaseColoringSSS<3> {
  public:
   bool solve() {
-    for (auto& item: allowed_colors_) {
-      if (item.second.empty()) {
-        return false;
-      }
+    if (has_uncolored_vertex()) {
+      return false;
     }
 
-    drop_2_colors_vertexes();
+//    drop_2_colors_vertexes();
+    drop_small_color_vertexes();
+    if (has_uncolored_vertex()) {
+      return false;
+    }
+    if (vertexes_.empty()) {
+      return answer;
+    }
+
 
     recalculate_pair_maps_();
 
@@ -355,19 +418,27 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
   }
 
   std::pair<Pair, Pair> get_adj_pairs(const Pair& pair) {
-    auto colors = allowed_colors_[pair.vertex];// colors_;
+    auto colors = colors_;
     colors.erase(pair.color);
 
     auto [c1, c2] = unpack_two_elems(colors);
     return {{pair.vertex, c1}, {pair.vertex, c2}};
   }
   Pair get_adj_pair(const Pair& pair1, const Pair& pair2) {
-    auto colors = allowed_colors_[pair1.vertex];;
+    auto colors = colors_;
     colors.erase(pair1.color);
     colors.erase(pair2.color);
 
     auto c = *colors.begin();
     return {pair1.vertex, c};
+  }
+
+  void color_vertex(const Pair& pair) {
+    for (auto& it: pair_constraints_[pair]) {
+      auto other_pair = get_other_pair(*it, pair);
+      drop_allow_color(other_pair);
+    }
+    drop_vertex(pair.vertex);
   }
 
   void recalculate_pair_maps_() {
@@ -391,15 +462,16 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
   bool case_3_different_vertexes_(const Pair& pair) {
     auto copy = *this;
 
-    for (auto& it: pair_constraints_[pair]) {
-      for (auto& p: *it) {
-        if (p != pair) {
-          copy.drop_allow_color(p);
-        }
-      }
-    }
-    copy.drop_vertex(pair.vertex);
-    copy.drop_2_colors_vertexes();
+//    for (auto& it: pair_constraints_[pair]) {
+//      for (auto& p: *it) {
+//        if (p != pair) {
+//          copy.drop_allow_color(p);
+//        }
+//      }
+//    }
+//    copy.drop_vertex(pair.vertex);
+    copy.color_vertex(pair);
+//    copy.drop_2_colors_vertexes();
 
     if (copy.solve()) {
       coloring = std::move(copy.coloring);
@@ -408,7 +480,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     }
 
     drop_allow_color(pair);
-    drop_2_colors_vertexes();
+//    drop_2_colors_vertexes();
 
     return solve();
   }
@@ -419,8 +491,10 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     auto copy = *this;
     copy.drop_allow_color(pair_v);
     copy.drop_allow_color(pair_x);
-    copy.drop_vertex(pair_w.vertex);
-    copy.drop_2_colors_vertexes();
+//    copy.drop_vertex(pair_w.vertex);
+    copy.color_vertex(pair_w);
+
+//    copy.drop_2_colors_vertexes();
 
     if (copy.solve()) {
       coloring = std::move(copy.coloring);
@@ -430,7 +504,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
 
     drop_allow_color(pair_w);
     drop_vertex(pair_v.vertex);
-    drop_2_colors_vertexes();
+//    drop_2_colors_vertexes();
 
     bool ans = solve();
     coloring[pair_v.vertex] = pair_v.color;
@@ -438,7 +512,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
   }
   bool case_2_b(const Pair& pair_x) {
     drop_allow_color(pair_x);
-    drop_2_colors_vertexes();
+//    drop_2_colors_vertexes();
     return solve();
   }
 
@@ -456,7 +530,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     copy.drop_allow_color(pair3);
     copy.drop_vertex(adj_pair.vertex);
     copy.drop_vertex(adj_pair.vertex == pair_v.vertex ? pair_w.vertex : pair_v.vertex);
-    copy.drop_2_colors_vertexes();
+//    copy.drop_2_colors_vertexes();
 
     if (copy.solve()) {
       coloring = std::move(copy.coloring);
@@ -471,8 +545,9 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     }
 
     drop_allow_color(adj_pair);
-    drop_vertex(pair3.vertex);
-    drop_2_colors_vertexes();
+//    drop_vertex(pair3.vertex);
+    color_vertex(pair3);
+//    drop_2_colors_vertexes();
 
     bool ans = solve();
     coloring[pair3.vertex] = pair3.color;
@@ -511,7 +586,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
         }
 
         drop_allow_color(adj_pair);
-        drop_2_colors_vertexes();
+//        drop_2_colors_vertexes();
 
         return solve();
       }
@@ -541,7 +616,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
         }
       }
 
-      drop_2_colors_vertexes();
+//      drop_2_colors_vertexes();
     }
 
     if (possible_colors.size() == 2) {
@@ -669,7 +744,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
 
   bool case_3_a(const Pair& pair) {
     drop_allow_color(pair);
-    drop_2_colors_vertexes();
+//    drop_2_colors_vertexes();
 
     return solve();
   }
@@ -696,6 +771,20 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
       return ans;
     }
 
+    std::set<Pair> set_pairs(pairs.begin(), pairs.end());
+    auto pair_adjs = get_adj_pairs(pair);
+    set_pairs.insert(pair_adjs.first);
+    set_pairs.insert(pair_adjs.second);
+
+    for (auto& iter: pair_constraints_[pair_w]) {
+      Pair other = get_other_pair(*iter, pair_w);
+
+      if (!set_pairs.contains(other)) {
+        add_constraint({other, pair});
+        return solve();
+      }
+    }
+
     auto it = pair_constraints_[pair_w].begin();
     auto pair_1 = get_other_pair(**it, pair_w);
     ++it;
@@ -703,11 +792,12 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
 
     auto copy = *this;
 
-    copy.drop_vertex(pair_w.vertex);
+//    copy.drop_vertex(pair_w.vertex);
+    copy.color_vertex(pair_w);
     if (pair_1.vertex != pair_2.vertex) {
       copy.drop_allow_color(pair_1);
       copy.drop_allow_color(pair_2);
-      copy.drop_2_colors_vertexes();
+//      copy.drop_2_colors_vertexes();
 
       if (copy.solve()) {
         coloring = std::move(copy.coloring);
@@ -717,7 +807,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     } else {
       copy.drop_vertex(pair.vertex);
       copy.drop_allow_color(pair_x);
-      copy.drop_2_colors_vertexes();
+//      copy.drop_2_colors_vertexes();
 
       if (copy.solve()) {
         coloring = std::move(copy.coloring);
@@ -729,7 +819,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
 
     drop_allow_color(pair_w);
     drop_allow_color(pair);
-    drop_2_colors_vertexes();
+//    drop_2_colors_vertexes();
 
     return solve();
   }
@@ -738,14 +828,41 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     if (pairs[0].vertex == pairs[1].vertex) {
       pair_w = get_adj_pair(pairs[0], pairs[1]);
       pair_x = get_adj_pair(pairs[2], pairs[3]);
-    }
-    if (pairs[0].vertex == pairs[2].vertex) {
+    } else if (pairs[0].vertex == pairs[2].vertex) {
       pair_w = get_adj_pair(pairs[0], pairs[2]);
       pair_x = get_adj_pair(pairs[1], pairs[3]);
-    }
-    if (pairs[0].vertex == pairs[3].vertex) {
+    } else if (pairs[0].vertex == pairs[3].vertex) {
       pair_w = get_adj_pair(pairs[0], pairs[3]);
       pair_x = get_adj_pair(pairs[1], pairs[2]);
+    } else {
+      pair_w = pairs[0];
+      pair_x = pairs[1];
+    }
+
+    std::set<Pair> set_pairs(pairs.begin(), pairs.end());
+    if (set_pairs.contains(pair_w) || set_pairs.contains(pair_x)) {
+      return case_3_a(pair);
+    }
+
+    auto pair_adjs = get_adj_pairs(pair);
+    set_pairs.insert(pair_adjs.first);
+    set_pairs.insert(pair_adjs.second);
+
+    for (auto& iter: pair_constraints_[pair_w]) {
+      Pair other = get_other_pair(*iter, pair_w);
+
+      if (!set_pairs.contains(other)) {
+        add_constraint({other, pair});
+        return solve();
+      }
+    }
+    for (auto& iter: pair_constraints_[pair_x]) {
+      Pair other = get_other_pair(*iter, pair_x);
+
+      if (!set_pairs.contains(other)) {
+        add_constraint({other, pair});
+        return solve();
+      }
     }
 
     drop_vertex(pair.vertex);
@@ -760,7 +877,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
   }
 
   bool case_3_different_constraints_(const Pair& pair) {
-    if (pair_vertexes_constr_[pair].size() == 1) {
+    if (pair_vertexes_constr_[pair].size() == 1 || pair_constraints_[pair].size() >= 5) {
       return case_3_a(pair);
     }
 
@@ -799,7 +916,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     copy.drop_allow_color(path[1]);
     copy.drop_allow_color(path[2]);
     copy.drop_allow_color(path[4]);
-    copy.drop_2_colors_vertexes();
+//    copy.drop_2_colors_vertexes();
 
     if (copy.solve()) {
       coloring = std::move(copy.coloring);
@@ -812,7 +929,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     copy2.drop_vertex(path[1].vertex);
     copy2.drop_allow_color(path[0]);
     copy2.drop_allow_color(path[2]);
-    copy2.drop_2_colors_vertexes();
+//    copy2.drop_2_colors_vertexes();
 
     if (copy2.solve()) {
       coloring = std::move(copy2.coloring);
@@ -823,7 +940,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     drop_vertex(path[2].vertex);
     drop_allow_color(path[1]);
     drop_allow_color(path[3]);
-    drop_2_colors_vertexes();
+//    drop_2_colors_vertexes();
 
     bool ans = solve();
     coloring[path[2].vertex] = path[2].color;
@@ -835,7 +952,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     copy.drop_vertex(path[2].vertex);
     copy.drop_allow_color(path[1]);
     copy.drop_allow_color(path[3]);
-    copy.drop_2_colors_vertexes();
+//    copy.drop_2_colors_vertexes();
 
     if (copy.solve()) {
       coloring = std::move(copy.coloring);
@@ -848,7 +965,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     drop_vertex(path[3].vertex);
     drop_allow_color(path[0]);
     drop_allow_color(path[2]);
-    drop_2_colors_vertexes();
+//    drop_2_colors_vertexes();
 
     bool ans = solve();
     coloring[path[1].vertex] = path[1].color;
@@ -881,7 +998,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     copy.drop_vertex(path[1].vertex);
     copy.drop_allow_color(path[0]);
     copy.drop_allow_color(path[2]);
-    copy.drop_2_colors_vertexes();
+//    copy.drop_2_colors_vertexes();
 
     if (copy.solve()) {
       coloring = std::move(copy.coloring);
@@ -892,7 +1009,7 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
     drop_vertex(path[2].vertex);
     drop_allow_color(path[1]);
     drop_allow_color(path[3]);
-    drop_2_colors_vertexes();
+//    drop_2_colors_vertexes();
 
     bool ans = solve();
     coloring[path[2].vertex] = path[2].color;
@@ -926,6 +1043,18 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
   }
 
   bool case_2_different_constraints_() {
+    for (auto vertex: vertexes_) {
+      for (auto color: allowed_colors_[vertex]) {
+        Pair pair = {vertex, color};
+        if (!pair_constraints_.contains(pair) || pair_constraints_[pair].empty()) {
+          drop_vertex(vertex);
+          bool ans = solve();
+          coloring[vertex] = color;
+          return ans;
+        }
+      }
+    }
+
     for (auto& item: pair_constraints_) {
       auto [pair1, pair2] = get_two_neighbor(item.first);
       std::vector<Pair> path({pair1, item.first, pair2});
@@ -1003,6 +1132,8 @@ class SSS<3, 2>: public BaseColoringSSS<3> {
 
   std::map<Pair, std::set<Constraints_iterator>> pair_constraints_;
   std::map<Pair, std::set<Vertex>> pair_vertexes_constr_;
+
+  bool answer = true;
 
  public:
   std::map<Vertex, Color> coloring;

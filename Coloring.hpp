@@ -6,6 +6,7 @@
 #define INC_3COLORING__COLORING_HPP_
 
 #include "SSS.hpp"
+#include <queue>
 
 struct Tree{
   Vertex root;
@@ -17,6 +18,7 @@ struct Tree{
 };
 using Forest = std::set<Tree>;
 using Coloring = std::map<Vertex, Color>;
+using Edges = std::map<Vertex, std::set<Vertex>>;
 
 class ColoringSolver {
  public:
@@ -41,7 +43,6 @@ class ColoringSolver {
     }
   }
 
-
   void add_all_colors(Vertex vertex) {
     for (auto color: colors_) {
       allowed_colors_[vertex].insert(color);
@@ -54,53 +55,45 @@ class ColoringSolver {
   }
 
   bool solve() {
-    add_all_colors();
-    drop_2_deg_vertexes_();
+    std::set<Vertex> was_in;
 
-    if (vertexes_.empty()) {
-      return true;
-    }
+    for (auto& vertex: vertexes_) {
+      if (was_in.contains(vertex)) {
+        continue;
+      }
 
-    make_forest_();
+      std::queue<Vertex> queue;
+      queue.push(vertex);
+      Edges edges;
 
-    auto coloring_vertex = get_coloring_vertexes_();
-    auto sss = make_SSS_();
-    std::vector<Color> coloring_vec;
-    Coloring coloring;
+      while (!queue.empty()) {
+        Vertex now = queue.front();
+        queue.pop();
 
-    for (auto v: coloring_vertex) {
-      coloring[v] = 0;
-    }
-
-    while (true) {
-      bool end = true;
-      for (auto& item: coloring) {
-        if (item.second != 2) {
-          item.second += 1;
-          end = false;
-          break;
-        } else {
-          item.second = 0;
+        for (auto other_v: edges_[now]) {
+          if (!was_in.contains(other_v)) {
+            queue.push(other_v);
+            was_in.insert(other_v);
+          }
         }
+
+        edges[now] = edges_[now];
       }
 
-      if (end) {
-        break;
-      }
-
-      auto sss_copy = sss;
-      set_coloring_vertexes_(coloring, sss_copy);
-      if (sss_copy.solve()) {
-        coloring_ = sss_copy.coloring;
-        return true;
+      ColoringSolver connected(edges);
+      if (!connected.solve_connected()) {
+        return false;
       }
     }
 
-    return false;
+    return true;
   }
 
   bool stupid_solve() {
     auto v = *vertexes_.begin();
+    if (v == 5) {
+//      std::cout << v << "\n";
+    }
 
     if (vertexes_.size() == 1) {
       if (!allowed_colors_[v].empty()) {
@@ -121,7 +114,7 @@ class ColoringSolver {
       for (auto u: edges_[v]) {
         copy.drop_allow_color(u, color);
         if (copy.allowed_colors_[u].empty()) {
-          return false;
+          continue;
         }
       }
 
@@ -168,8 +161,27 @@ class ColoringSolver {
 //
 //    return coloring;
 //  }
+  ColoringSolver() = default;
 
  private:
+  explicit ColoringSolver(const Edges& edges): edges_(edges) {
+    for (auto& item: edges) {
+      vertexes_.insert(item.first);
+    }
+  }
+
+  bool check_coloring_(const Coloring& coloring) {
+    for (auto& item: coloring) {
+      for (auto v: edges_[item.first]) {
+        if (coloring.contains(v) && coloring.at(v) == item.second) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
   void drop_2_deg_vertexes_() {
     bool dropped = true;
 
@@ -348,8 +360,8 @@ class ColoringSolver {
         sss.drop_allow_color({v, item.second});
 
         if (sss.get_allow_color(v).size() == 1) {
-          sss.drop_vertex(v);
           auto color = *sss.get_allow_color(v).begin();
+          sss.drop_vertex(v);
 
           for (auto& u: edges_[v]) {
             sss.drop_allow_color({u, color});
@@ -358,13 +370,64 @@ class ColoringSolver {
       }
     }
 
-    sss.drop_2_colors_vertexes();
+//    sss.drop_2_colors_vertexes();
     return sss;
+  }
+
+
+  bool solve_connected() {
+    add_all_colors();
+    drop_2_deg_vertexes_();
+
+    if (vertexes_.empty()) {
+      return true;
+    }
+
+    make_forest_();
+
+    auto coloring_vertex = get_coloring_vertexes_();
+    auto sss = make_SSS_();
+    std::vector<Color> coloring_vec;
+    Coloring coloring;
+
+    for (auto v: coloring_vertex) {
+      coloring[v] = 0;
+    }
+
+    while (true) {
+      bool end = true;
+      for (auto& item: coloring) {
+        if (item.second != 2) {
+          ++item.second;
+          end = false;
+          break;
+        } else {
+          item.second = 0;
+        }
+      }
+
+      if (end) {
+        break;
+      }
+
+      if (!check_coloring_(coloring)) {
+        break;
+      }
+
+      auto sss_copy = sss;
+      set_coloring_vertexes_(coloring, sss_copy);
+      if (sss_copy.solve()) {
+        coloring_ = sss_copy.coloring;
+        return true;
+      }
+    }
+
+    return false;
   }
 
  private:
   std::set<Vertex> vertexes_;
-  std::map<Vertex, std::set<Vertex>> edges_;
+  Edges edges_;
 
   Forest forest_;
 //  std::map<Vertex, Forest::iterator> vertex_tree_;
